@@ -174,7 +174,7 @@ void checkSettings()
 
 void loop()
 {
-  Vector rawAccel = mpu.readRawAccel();
+  // Vector rawAccel = mpu.readRawAccel();
   Activites act = mpu.readActivites();
   Serial.print(act.isFreeFall);
   Serial.print("\n");
