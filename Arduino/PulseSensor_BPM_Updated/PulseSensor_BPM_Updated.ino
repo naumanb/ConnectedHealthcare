@@ -56,8 +56,10 @@
 const int OUTPUT_TYPE = SERIAL_PLOTTER;
 const char * localName = "nRF52832 HeartBeat";
 BLEPeripheral blePeriph;
-BLEService bleServ("180D");
-BLECharCharacteristic sensorChar("2A37", BLERead | BLENotify);
+
+BLEService hrmServ("180D");
+BLEFloatCharacteristic hrmChar("2A37", BLERead | BLENotify);
+
 /*
    Pinout:
      PIN_INPUT = Analog Input. Connected to the pulse sensor
@@ -107,7 +109,7 @@ void setup() {
 
   // Configure the PulseSensor manager.
   pulseSensor.analogInput(0);
-  //  pulseSensor.blinkOnPulse(13);
+  pulseSensor.blinkOnPulse(13);
   pulseSensor.fadeOnPulse(5);
 
   //  pulseSensor.setSerial(Serial);
@@ -135,12 +137,12 @@ void setup() {
     }
   }
 
-  setupBLE();
+//  setupBLE();
 }
 
 void loop() {
-  blePeriph.poll();
-  BLECentral central = blePeriph.central();
+//  blePeriph.poll();
+//  BLECentral central = blePeriph.central();
   /*
      See if a sample is ready from the PulseSensor.
 
@@ -153,41 +155,20 @@ void loop() {
      sample (analog voltage) from the PulseSensor.
   */
 
-  if (central) {
-    
-    while (central.connected()) {
-      digitalWrite(13, HIGH);
-      long currentMillis = millis();
-      if (pulseSensor.sawNewSample()) {
-        /*
-           Every so often, send the latest Sample.
-           We don't print every sample, because our baud rate
-           won't support that much I/O.
-        */
-        if (--samplesUntilReport == (byte) 0) {
-          samplesUntilReport = SAMPLES_PER_SERIAL_SAMPLE;
-
-          /*
-             At about the beginning of every heartbeat,
-             report the heart rate and inter-beat-interval.
-          */
-
-        }
-
-        /*******
-          Here is a good place to add code that could take up
-          to a millisecond or so to run.
-        *******/
-      }
-
-      if (currentMillis - previousMillis >= 1000) {
-        previousMillis = currentMillis;
-        int bpm = pulseSensor.getBeatsPerMinute();
-        sensorChar.setValue(bpm);
-      }
-    }
-    digitalWrite(13,LOW);
-  }
+//  if (central) {
+//    
+//    while (central.connected()) {
+//      digitalWrite(13, HIGH);
+//      long currentMillis = millis();
+//
+//      if (currentMillis - previousMillis >= 1000) {
+//        previousMillis = currentMillis;
+//        int bpm = pulseSensor.getBeatsPerMinute();
+//        hrmChar.setValue(bpm);
+//      }
+//    }
+//    digitalWrite(13,LOW);
+//  }
   /******
      Don't add code here, because it could slow the sampling
      from the PulseSensor.
@@ -198,22 +179,15 @@ void setupBLE() {
   // Advertise name and service:
   blePeriph.setDeviceName(localName);
   blePeriph.setLocalName(localName);
-  blePeriph.setAdvertisedServiceUuid(bleServ.uuid());
+  blePeriph.setAdvertisedServiceUuid(hrmServ.uuid());
 
   // Add service
-  blePeriph.addAttribute(bleServ);
+  blePeriph.addAttribute(hrmServ);
 
   // Add characteristic
-  blePeriph.addAttribute(sensorChar);
+  blePeriph.addAttribute(hrmChar);
 
   // Now that device, service, characteristic are set up,
   // initialize BLE:
-  blePeriph.begin();
+//  blePeriph.begin();
 }
-
-void updateHeartRate() {
-  if (pulseSensor.sawStartOfBeat()) {
-    
-  }
-}
-
