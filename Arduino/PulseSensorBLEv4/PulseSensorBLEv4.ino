@@ -12,146 +12,90 @@
   It will be on when the board is connected to a peripheral. It will be off when the board is disconnected.
   This example code is in the public domain.
 */
-
+#include <Wire.h>
 #include <BLEPeripheral.h>
 #include "DFRobot_Heartrate.h"
-#include <Wire.h>
 #include <MPU6050.h>
 
 #define heartratePin A5
 
+MPU6050 mpu;
+
 BLEPeripheral blePeripheral;          // BLE Peripheral Device
 BLEService heartRateService("180D");  // BLE Heart Rate Service
-
+BLEService rfidService("fff0");
+BLEService fallService("ddd0");
 // BLE Heart Rate Measurement Characteristic"
 BLECharacteristic heartRateChar("2A37",  // standard 16-bit characteristic UUID
                                 BLENotify, 2);  // remote clients will be able to get notifications if this characteristic changes
 // the characteristic is 2 bytes long as the first field needs to be "Flags" as per BLE specifications
 // https:/developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.heart_rate_measurement.xml
+BLEFixedLengthCharacteristic rfidChar("fff1", BLENotify, 5);
+BLEBoolCharacteristic fallChar("ddd1", BLENotify);
 
 DFRobot_Heartrate heartrate(DIGITAL_MODE); ///< ANALOG_MODE or DIGITAL_MODE
-MPU6050 mpu;
-
-boolean ledState = false;
-boolean freefallDetected = false;
-int freefallBlinkCount = 0;
-
+uint8_t avg = 0;
 unsigned long bAvg[10];
 uint8_t bCount = 0;
 
+bool bpsUpdate = true;
+bool rfidUpdate = false;
+boolean fall = false;
+
+boolean freefallDetected = false;
+int freefallBlinkCount = 0;
+
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
 
   blePeripheral.setLocalName("HeartRateSketch");                     // Set a local name for the BLE device
   blePeripheral.setAdvertisedServiceUuid(heartRateService.uuid());   // add the service UUID
   blePeripheral.addAttribute(heartRateService);                      // Add the BLE Heart Rate service
   blePeripheral.addAttribute(heartRateChar);                         // add the Heart Rate Measurement characteristic
+  blePeripheral.addAttribute(rfidService);                      // Add the RFID service
+  blePeripheral.addAttribute(rfidChar);                         // add the RFID characteristic
+  blePeripheral.addAttribute(fallService);                      // Add the Fall Detection service
+  blePeripheral.addAttribute(fallChar);                         // add the Fall Detection characteristic
   
   blePeripheral.begin();  //activate BLE device to continuosly transmit BLE advertising packets.
   //Your board will be visible to central devices until it receives a new connection
-  Serial.println("Bluetooth device active, waiting for connections...");
 
+  pinMode(13, OUTPUT);
+  pinMode(4, OUTPUT);
+  digitalWrite(4, LOW);
+  digitalWrite(13, LOW);
+
+  mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_16G);
   mpu.setAccelPowerOnDelay(MPU6050_DELAY_3MS);
-  
   mpu.setIntFreeFallEnabled(true);
   mpu.setIntZeroMotionEnabled(false);
   mpu.setIntMotionEnabled(false);
-  
   mpu.setDHPFMode(MPU6050_DHPF_5HZ);
-
   mpu.setFreeFallDetectionThreshold(17);
   mpu.setFreeFallDetectionDuration(2);  
   attachInterrupt(2, doInt, RISING);
-  
-  pinMode(13, OUTPUT);
-  digitalWrite(13, LOW);
-  
-}
-
-void doInt()
-{
-  freefallBlinkCount = 0;
-  freefallDetected = true;  
 }
 
 void loop() {
   BLECentral central = blePeripheral.central();   // listen for BLE peripherals to connect
 
-  if (central) {                             //when connected to a central
-    Serial.print("Connected to central: ");
-    Serial.println(central.address());       // print the central's MAC address:
-    //turn on BLE led
+  Activites act = mpu.readActivites();
 
-    // as long as the central is still connected:
-    while (central.connected()) {
-//      digitalWrite(13, HIGH);
-//      rfid_check();
-      heartrate.getValue(heartratePin);
-      uint8_t bps = heartrate.getRate();
-  
-      if(bps)  {
-        bAvg[bCount] = bps;
-    //    Serial.println(rateValue);
-        if(bCount<9){
-          bCount++;
-        }
-        else{
-          uint8_t avg = average(bAvg,10);
-  
-          uint8_t hrmdata[2] = { 0b00000110, avg };
-  
-          if ( heartRateChar.setValue(hrmdata, sizeof(hrmdata)) ){
-            // Note: We use .notify instead of .write!
-            // If it is connected but CCCD is not enabled
-            // The characteristic's value is still updated although notification is not sent
-  
-            Serial.print("Heart Rate Measurement updated to: "); Serial.println(avg); 
-          }else{
-            Serial.println("ERROR: Notify not set in the CCCD or not connected!");
-          }
-          bCount = 0;
-        }
-      }
-      Vector rawAccel = mpu.readRawAccel();
-      Activites act = mpu.readActivites();
-    
-      Serial.print(act.isFreeFall);
-      Serial.print("\n");
-      
-      if (freefallDetected)
-      {
-        ledState = !ledState;
-    
-//        digitalWrite(13, ledState);
-    
-        freefallBlinkCount++;
-    
-        if (freefallBlinkCount == 20)
-        {
-          freefallDetected = false;
-          ledState = false;
-//          digitalWrite(13, ledState);
-        }
-      }
-      digitalWrite(13, ledState);
-      delay(20);
+  heartrate.getValue(heartratePin);
+  uint8_t bps = heartrate.getRate();
+
+  if(bps)  {
+    bAvg[bCount] = bps;
+//    Serial.println(rateValue);
+    if(bCount<9){
+      bCount++;
     }
-    Serial.print("Disconnected from central: ");
-    Serial.println(central.address());
+    else{
+      avg = average(bAvg,10);
+      bCount = 0;
+      bpsUpdate = true;
+    }
   }
-  delay(20);
-}
-
-uint8_t average (unsigned long * array, uint8_t len)  // assuming array is int.
-{
-  long sum = 0L ;  // sum will be larger than an item, long for safety.
-  for (int i = 0 ; i < len ; i++)
-    sum += array [i] ;
-  return  (uint8_t)(sum / len) ;  // average will be fractional, so float may be appropriate.
-}
-
-void rfid_check(){
-  byte i = 0;
   byte val = 0;
   byte code[6];
   byte checksum = 0;
@@ -187,30 +131,66 @@ void rfid_check(){
           } else {
             tempbyte = val;                           // Store the first hex digit first...
           };
-
+          
           bytesread++;                                // ready to read next digit
         } 
       } 
-
-      // Output to Serial:
-
-      if (bytesread == 12) {                          // if 12 digit read is complete
-        Serial.print("5-byte code: ");
-        for (i=0; i<5; i++) {
-          if (code[i] < 16) Serial.print("0");
-          Serial.print(code[i], HEX);
-          Serial.print(" ");
-        }
-        Serial.println();
-
-        Serial.print("Checksum: ");
-        Serial.print(code[5], HEX);
-        Serial.println(code[5] == checksum ? " -- passed." : " -- error.");
-        Serial.println();
-      }
-
       bytesread = 0;
+      rfidUpdate = true;
     }
   }
+
+  if(act.isFreeFall){
+    fall = true;
+    digitalWrite(4, HIGH);
+  }
+  
+  if (central.connected()) { 
+    digitalWrite(13, HIGH);
+//      rfid_check();
+    if(bpsUpdate){
+      uint8_t hrmdata[2] = { 0b00000110, avg };
+      if ( heartRateChar.setValue(hrmdata, sizeof(hrmdata)) ){
+        // Note: We use .notify instead of .write!
+        // If it is connected but CCCD is not enabled
+        // The characteristic's value is still updated although notification is not sent
+      }
+      bpsUpdate = false;
+    }
+    if(rfidUpdate){
+      if ( rfidChar.setValue(code, sizeof(code)) ){
+        // Note: We use .notify instead of .write!
+        // If it is connected but CCCD is not enabled
+        // The characteristic's value is still updated although notification is not sent
+      }
+      rfidUpdate = false;
+    }
+    if(fall){
+      if ( fallChar.setValue(fall)){
+        // Note: We use .notify instead of .write!
+        // If it is connected but CCCD is not enabled
+        // The characteristic's value is still updated although notification is not sent
+      }
+      fall = false;
+    }
+  }
+  else{
+    digitalWrite(13, LOW);
+  }
+  delay(20);
+}
+
+uint8_t average (unsigned long * array, uint8_t len)  // assuming array is int.
+{
+  long sum = 0L ;  // sum will be larger than an item, long for safety.
+  for (int i = 0 ; i < len ; i++)
+    sum += array [i] ;
+  return  (uint8_t)(sum / len) ;  // average will be fractional, so float may be appropriate.
+}
+
+void doInt()
+{
+  freefallBlinkCount = 0;
+  freefallDetected = true;  
 }
 
