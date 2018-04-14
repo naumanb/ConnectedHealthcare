@@ -16,26 +16,45 @@
 #include <BLEPeripheral.h>
 #include "DFRobot_Heartrate.h"
 
+#define LED_PIN 4
 #define heartratePin A5
+#define xpin A3
+#define ypin A1
+#define zpin A2
 
 BLEPeripheral blePeripheral;          // BLE Peripheral Device
 BLEService heartRateService("180D");  // BLE Heart Rate Service
-BLEService rfidService("fff0");
+BLEService notifyService("fff0");
 
 // BLE Heart Rate Measurement Characteristic"
 BLECharacteristic heartRateChar("2A37",  // standard 16-bit characteristic UUID
                                 BLENotify, 2);  // remote clients will be able to get notifications if this characteristic changes
 // the characteristic is 2 bytes long as the first field needs to be "Flags" as per BLE specifications
 // https:/developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.heart_rate_measurement.xml
-BLEFixedLengthCharacteristic rfidChar("fff1", BLENotify, 5);
+BLEFixedLengthCharacteristic rfidChar("fff1", BLENotify, 6);
+BLEFixedLengthCharacteristic fallChar("fff2", BLENotify, 3);
+BLECharCharacteristic    ledChar = BLECharCharacteristic("fff3", BLERead | BLEWrite);
 
 DFRobot_Heartrate heartrate(DIGITAL_MODE); ///< ANALOG_MODE or DIGITAL_MODE
 uint8_t avg = 0;
 unsigned long bAvg[10];
 uint8_t bCount = 0;
 
+float sumsqr = 0;
+float xm,ym,zm;
+byte accel[3];
+
 bool bpsUpdate = true;
 bool rfidUpdate = false;
+bool fall = false;
+
+byte val = 0;
+byte code[6];
+byte checksum = 0;
+byte bytesread = 0;
+byte tempbyte = 0;
+
+long previousMillis = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -44,25 +63,32 @@ void setup() {
   blePeripheral.setAdvertisedServiceUuid(heartRateService.uuid());   // add the service UUID
   blePeripheral.addAttribute(heartRateService);                      // Add the BLE Heart Rate service
   blePeripheral.addAttribute(heartRateChar);                         // add the Heart Rate Measurement characteristic
-  blePeripheral.addAttribute(rfidService);                      // Add the RFID service
+  blePeripheral.addAttribute(notifyService);                      // Add the Notification service
   blePeripheral.addAttribute(rfidChar);                         // add the RFID characteristic
-  
+  blePeripheral.addAttribute(fallChar);                         // add the RFID characteristic
+  blePeripheral.addAttribute(ledChar);
   blePeripheral.begin();  //activate BLE device to continuosly transmit BLE advertising packets.
   //Your board will be visible to central devices until it receives a new connection
 
+  pinMode(LED_PIN, OUTPUT);
   pinMode(13, OUTPUT);
   pinMode(4, OUTPUT);
   digitalWrite(4, LOW);
-  digitalWrite(13, LOW);
-  
+  digitalWrite(13, LOW); 
 }
 
 void loop() {
   BLECentral central = blePeripheral.central();   // listen for BLE peripherals to connect
 
+  unsigned long currentMillis = millis();
+
   heartrate.getValue(heartratePin);
   uint8_t bps = heartrate.getRate();
 
+  accel[0] = analogRead(xpin);
+  accel[1] = analogRead(ypin);
+  accel[2] = analogRead(zpin);
+  
   if(bps)  {
     bAvg[bCount] = bps;
 //    Serial.println(rateValue);
@@ -75,11 +101,6 @@ void loop() {
       bpsUpdate = true;
     }
   }
-  byte val = 0;
-  byte code[6];
-  byte checksum = 0;
-  byte bytesread = 0;
-  byte tempbyte = 0;
 
   if(Serial.available() > 0) {
     if((val = Serial.read()) == 2) {                  // check for header 
@@ -116,8 +137,12 @@ void loop() {
       } 
       bytesread = 0;
       rfidUpdate = true;
-      digitalWrite(4, HIGH); 
     }
+  }
+
+  if (sumsqr > 1000){
+    digitalWrite(4, HIGH  );
+    fall = true;
   }
   
   if (central.connected()) { 
@@ -139,6 +164,19 @@ void loop() {
         // The characteristic's value is still updated although notification is not sent
       }
       rfidUpdate = false;
+    }
+    if(currentMillis - previousMillis > 200){
+      previousMillis = currentMillis;
+      fallChar.setValue(accel, sizeof(accel)); 
+    }
+    
+    if(ledChar.written()){
+      if(ledChar.value()){
+        digitalWrite(LED_PIN, HIGH);
+      }
+      else{
+        digitalWrite(LED_PIN, LOW);
+      }
     }
   }
   else{

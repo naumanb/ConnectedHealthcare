@@ -1,3 +1,4 @@
+
 /*
   HeartRateBLE.ino
   Written by Federico Sanna
@@ -15,6 +16,8 @@
 
 #include <BLEPeripheral.h>
 #include "DFRobot_Heartrate.h"
+#include <Wire.h>
+#include <MPU6050.h>
 
 #define heartratePin A5
 
@@ -31,6 +34,8 @@ BLEFixedLengthCharacteristic rfidChar("fff1", BLENotify, 5);
 BLEBoolCharacteristic fallChar("fff2", BLENotify);
 
 DFRobot_Heartrate heartrate(DIGITAL_MODE); ///< ANALOG_MODE or DIGITAL_MODE
+MPU6050 mpu;
+
 uint8_t avg = 0;
 unsigned long bAvg[10];
 uint8_t bCount = 0;
